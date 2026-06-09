@@ -2,10 +2,10 @@
   "name": "my-speller-api",
   "version": "1.0.0",
   "description": "Korean Speller API",
-  "main": "index.ts",
+  "main": "server.ts",
   "scripts": {
-    "start": "bun run index.ts",
-    "dev": "bun --watch index.ts"
+    "start": "bun run server.ts",
+    "dev": "bun --watch server.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
