@@ -49,58 +49,45 @@ app.post('/', limiter, async (req, res) => {
   try {
     assert(body, RequestBodyStruct)
   } catch (e) {
+    console.error('검증 에러 (Request Body Mismatch):', e)
     return res.status(400).send('Invalid request body')
   }
 
-  const text = body.text.split('\n').join('\r\n')
+  const text = body.text
 
   try {
-    // 💡 최신 부산대 개편 보안 우회를 위한 필수 헤더 정보 세팅
-    const spellerRes = await fetch(spellerUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://nara-speller.co.kr/speller/'
-      },
-      body: `text1=${encodeURIComponent(text)}`,
+    // 💡 hanspell 콜백을 Promise로 감싸서 처리
+    const suggestions = await new Promise((resolve, reject) => {
+      
+      // 🔥 [여기 중요!] spellCheckByPNU 대신 spellCheckByDAUM을 호출합니다.
+      hanspell.spellCheckByDAUM(
+        text,
+        6000,
+        (result: any) => {
+          if (!result || result.length === 0) {
+            return resolve([])
+          }
+
+          // 질문자님의 원래 프론트엔드 형식에 맞게 변환
+          const mapped = result.map((item: any) => ({
+            description: item.info?.replace(/<br\s*\/?>/gi, '\n') ?? '맞춤법 오류 가능성이 있습니다.',
+            start: 0, 
+            end: 0,
+            text: item.token,                 // 틀린 단어
+            candidates: item.suggestions ?? [], // 추천 단어 배열
+          }))
+          resolve(mapped)
+        },
+        (err: any) => {
+          reject(err)
+        }
+      )
     })
 
-    if (!spellerRes.ok) {
-      throw new Error(`부산대 서버 응답 실패: ${spellerRes.status}`)
-    }
-
-    const result = await spellerRes.text()
-
-    // 💡 개편된 부산대 결과 페이지의 새로운 자바스크립트 변수 패턴 파싱
-    // 최근 개편으로 data = [ ... ] 구조가 변했거나 다르게 직렬화되는 문제를 방어합니다.
-    const dataMatch = result.match(/data\s*=\s*(\[[ \t]*\{[\s\S]*?\}]);/);
-    const dataString = dataMatch?.[1] ?? ''
-
-    if (!dataString) {
-      return res.status(200).json({
-        suggestions: [],
-      })
-    }
-
-    // JSON 파싱 후 데이터 추출
-    const rawData = JSON.parse(dataString)[0]
-    const errInfo = (rawData.errInfo ?? [])
-      .filter((err: any) => err.candWord)
-      .map((err: any) => ({
-        description: err.help?.replace(/<br\s*\/?>/gi, '\n') ?? '', // 도움말 태그 깔끔하게 정리
-        start: err.start,
-        end: err.end,
-        text: err.orgStr,
-        candidates: err.candWord.split('|').map((w: string) => w.trim()), // 공백 제거
-      }))
-
-    return res.status(200).json({
-      suggestions: errInfo,
-    } satisfies Infer<typeof ResponseStruct>)
+    return res.status(200).json({ suggestions })
 
   } catch (e) {
-    console.error('맞춤법 검사 엔진 내부 에러:', e)
+    console.error('맞춤법 엔진 내부 에러 상세:', e)
     return res.status(500).send('Internal Server Error')
   }
 })
